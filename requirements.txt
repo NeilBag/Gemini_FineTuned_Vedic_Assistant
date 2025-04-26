@@ -1,0 +1,6 @@
+Flask
+google-generativeai
+python-docx
+xhtml2pdf
+Werkzeug
+gunicorn==20.1.0

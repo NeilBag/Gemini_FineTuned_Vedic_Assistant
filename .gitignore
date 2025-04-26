@@ -1,0 +1,23 @@
+# Environment variables - DO NOT COMMIT!
+.env
+
+# Flask-Session directory
+.flask_session/
+
+# Uploads directory
+uploads/
+
+# Python virtual environment (if you use one)
+venv/
+env/
+*.venv
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# OS-specific files
+.DS_Store
+Thumbs.db
