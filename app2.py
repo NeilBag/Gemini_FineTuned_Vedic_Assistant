@@ -62,12 +62,12 @@ class GenerativeAISettings:
     def __init__(self):
         # IMPORTANT: Set GEMINI_API_KEY in Render Environment Variables
         self.API_KEY = os.getenv("GEMINI_API_KEY")
-        self.MODEL_NAME = "gemini-1.5-flash" # Or your fine-tuned model name if applicable
+        self.MODEL_NAME = "tunedModels/hinduism-veda-expert-v1" # Or your fine-tuned model name if applicable
         self.GENERATION_CONFIG = {
-            "temperature": 0.7,
+            "temperature": 0.1,
             "top_p": 0.95,
             "top_k": 64,
-            "max_output_tokens": 8192,
+            "max_output_tokens": 128000,
             "response_mime_type": "text/plain",
         }
 
