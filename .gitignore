@@ -1,23 +1,25 @@
-# Environment variables - DO NOT COMMIT!
+# Environment variables
 .env
 
-# Flask-Session directory
-.flask_session/
-
-# Uploads directory
-uploads/
-
-# Python virtual environment (if you use one)
-venv/
-env/
-*.venv
-
-# Python cache files
+# Python cache and virtual environments
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+venv/
+env/
+*.venv
+
+# Runtime generated folders (managed by persistent disks on Render)
+uploads/
+chat_histories/
+# If you used Flask-Session before:
+.flask_session/
 
 # OS-specific files
 .DS_Store
 Thumbs.db
+
+# IDE specific files (optional)
+.idea/
+.vscode/
