@@ -44,8 +44,7 @@ class GenerativeAISettings:
             "max_output_tokens": 8192, # Max for Gemini 1.5 Flash
             "response_mime_type": "text/plain",
         }
-        # Client options for regional endpoint
-        self.CLIENT_OPTIONS = {"api_endpoint": "europe-west1-generativelanguage.googleapis.com"}
+      
 
 # Global AI settings instance
 ai_settings = GenerativeAISettings()
