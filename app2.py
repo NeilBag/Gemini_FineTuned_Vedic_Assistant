@@ -30,7 +30,6 @@ class Configuration:
         self.UPLOAD_FOLDER = 'uploads'
         self.ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'pdf', 'txt', 'docx', 'mp4', 'avi', 'mov'}
         self.MAX_CONTENT_LENGTH = 16 * 1024 * 1024
-        # tempfile module handles temporary file creation and cleanup
 
 class GenerativeAISettings:
     def __init__(self):
@@ -38,13 +37,13 @@ class GenerativeAISettings:
         # This is the prompt structure your Veda model was trained on
         self.PROMPT_TEMPLATE_VEDA = "Based on Hindu Vedic scriptures, answer the following question:\nQuestion: {user_question_and_context}\nAnswer:"
         self.GENERATION_CONFIG_DICT = { # Store as dict to pass to GenerationConfig object
-            "temperature": 0.6, # Slightly lower for more factual Q&A
-            "top_p": 0.9,       # Common default
-            "top_k": 40,        # Common default
-            "max_output_tokens": 8192, # Max for Gemini 1.5 Flash
+            "temperature": 0.6,
+            "top_p": 0.9,
+            "top_k": 40,
+            "max_output_tokens": 8192,
             "response_mime_type": "text/plain",
         }
-      
+        # self.CLIENT_OPTIONS = {"api_endpoint": "europe-west1-generativelanguage.googleapis.com"} # REMOVED - Will use global endpoint
 
 # Global AI settings instance
 ai_settings = GenerativeAISettings()
@@ -54,18 +53,18 @@ def create_app(config=Configuration()):
     app.config.from_object(config)
 
     api_key = os.getenv("GEMINI_API_KEY")
-if api_key:
-    logger.info(f"DEBUG: GEMINI_API_KEY loaded. Length: {len(api_key)}. First 5: {api_key[:5]}, Last 5: {api_key[-5:]}")
-    try:
-        # !!!! REMOVE client_options !!!!
-        genai.configure(
-            api_key=api_key
-        )
-        logger.info("Generative AI SDK configured successfully (using default global endpoint).")
-    except Exception as e:
-        logger.exception(f"Failed to configure Generative AI SDK: {e}")
-else:
-    logger.error("CRITICAL: GEMINI_API_KEY is NOT SET in the environment. AI features will not work.")
+    if api_key:
+        logger.info(f"DEBUG: GEMINI_API_KEY loaded. Length: {len(api_key)}. First 5: {api_key[:5]}, Last 5: {api_key[-5:]}")
+        try:
+            # !!!! CHANGED: Removed client_options !!!!
+            genai.configure(
+                api_key=api_key
+            )
+            logger.info("Generative AI SDK configured successfully (using default global endpoint).")
+        except Exception as e:
+            logger.exception(f"Failed to configure Generative AI SDK: {e}")
+    else:
+        logger.error("CRITICAL: GEMINI_API_KEY is NOT SET in the environment. AI features will not work.")
 
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
     return app
@@ -76,14 +75,10 @@ app = create_app()
 model = None
 if os.getenv("GEMINI_API_KEY"): # Check if API key was set for configuration
     try:
-        # !!!! FIXED: client_options is not passed to GenerativeModel directly !!!!
         model = genai.GenerativeModel(
             model_name=ai_settings.MODEL_NAME
-            # generation_config is passed to generate_content
-            # safety_settings can be set here if you want global safety settings
         )
-        logger.info(f"Global GenerativeModel '{ai_settings.MODEL_NAME}' initialized.")
-        # The regional endpoint is now handled by genai.configure()
+        logger.info(f"Global GenerativeModel '{ai_settings.MODEL_NAME}' initialized (using default global endpoint).")
     except Exception as e:
         logger.exception(f"Failed to initialize global GenerativeModel '{ai_settings.MODEL_NAME}': {e}")
 else:
@@ -97,7 +92,7 @@ def allowed_file(filename):
 def secure_save_file(file):
     if not file or not file.filename: return None, None
     filename = secure_filename(file.filename)
-    if not filename: filename = "unnamed_file_" + tempfile.mktemp().split(os.sep)[-1] # More unique unnamed
+    if not filename: filename = "unnamed_file_" + tempfile.mktemp().split(os.sep)[-1]
     file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     try:
         file.save(file_path)
@@ -120,7 +115,7 @@ def read_file_content(file_path):
         else:
             logger.warning(f"Content reading not supported for extension: {extension}")
             return f"(File type {extension} not processed for content)"
-        max_chars = 15000 # Increased, but be mindful of overall prompt size for the model
+        max_chars = 15000
         if len(content) > max_chars:
             content = content[:max_chars] + "\n... [truncated]"
         return content
@@ -176,19 +171,17 @@ def index2():
     if 'chat_history' not in session:
         session['chat_history'] = []
 
-    if model is None: # Check if the global model failed to initialize
+    if model is None:
         flash("AI Model is not configured or failed to initialize. Please check the GEMINI_API_KEY and server logs.", "error")
         template_history = build_history_for_template(session['chat_history'])
         return render_template("index2.html", history=template_history)
 
-    # Create GenerationConfig object from settings for each request
     generation_config_obj = genai.types.GenerationConfig(**ai_settings.GENERATION_CONFIG_DICT)
-
     user_prompt_for_history = ""
     full_content_for_model = ""
 
     if request.method == "POST":
-        prompt_for_api = "" # Initialize to avoid UnboundLocalError in except block
+        prompt_for_api = ""
         try:
             user_text_prompt = request.form.get("prompt", "").strip()
             user_prompt_for_history = user_text_prompt
@@ -221,24 +214,20 @@ def index2():
             else:
                 full_content_for_model = user_text_prompt
 
-            if not full_content_for_model.strip(): # Check if there's any actual content
+            if not full_content_for_model.strip():
                 flash("Please enter a prompt or upload a file with content.", "warning")
                 template_history = build_history_for_template(session['chat_history'])
                 return render_template("index2.html", history=template_history)
 
-            # Format the full content using the model's expected Q&A template
             prompt_for_api = ai_settings.PROMPT_TEMPLATE_VEDA.format(user_question_and_context=full_content_for_model)
-
             logger.info("Sending prompt to Generative AI using generate_content...")
             logger.info(f"Formatted prompt for API (first 300 chars): {prompt_for_api[:300]}...")
 
-            # --- Use model.generate_content() ---
             response = model.generate_content(
                 prompt_for_api,
                 generation_config=generation_config_obj,
-                # safety_settings=... # Optional: add safety settings
             )
-            response_text = response.text # Assuming response.text is directly available
+            response_text = response.text
             logger.info(f"Received response from Generative AI (first 300 chars): {response_text[:300]}...")
 
             session['chat_history'].append({'user': user_prompt_for_history, 'model': response_text})
@@ -275,6 +264,13 @@ def index2():
             logger.error(traceback.format_exc())
             flash(f"An API error occurred (InvalidArgument): {str(e)}. This often means the prompt structure is not what the fine-tuned model expects or the content is problematic.", "error")
             return redirect(url_for('index2'))
+        except exceptions.MethodNotImplemented as e: # Catch the specific error
+            logger.error(f"Problematic full_content_for_model (first 300 chars): {full_content_for_model[:300]}")
+            logger.error(f"Problematic prompt_for_api (first 300 chars): {prompt_for_api[:300] if 'prompt_for_api' in locals() else 'Not generated'}")
+            logger.error(f"MethodNotImplemented error (501/404) processing POST request: {str(e)}")
+            logger.error(traceback.format_exc())
+            flash(f"An API error occurred (MethodNotImplemented/404): {str(e)}. This usually means the model name is incorrect, or the API endpoint cannot find/serve this specific fine-tuned model. Try removing regional client_options if set.", "error")
+            return redirect(url_for('index2'))
         except Exception as e:
             logger.error(f"Problematic full_content_for_model (first 300 chars): {full_content_for_model[:300]}")
             logger.error(f"General error processing POST request: {str(e)}")
@@ -299,7 +295,7 @@ def request_entity_too_large(e):
 @app.route("/minimal_test")
 def minimal_test_route():
     logger = logging.getLogger(__name__)
-    logger.info("Executing /minimal_test route")
+    logger.info("Executing /minimal_test route (using default global endpoint)")
 
     if not os.getenv("GEMINI_API_KEY"):
         logger.error("MINIMAL_TEST: GEMINI_API_KEY not found.")
@@ -330,6 +326,10 @@ def minimal_test_route():
         response_text = response.text if hasattr(response, 'text') and response.text else str(response)
         logger.info(f"MINIMAL_TEST: Response received: {response_text}")
         return f"Minimal test successful. Response: {response_text}", 200
+    except exceptions.MethodNotImplemented as e: # Catch the specific error
+        logger.error(f"MINIMAL_TEST: MethodNotImplemented error (501/404) for model {test_model_name}: {str(e)}")
+        logger.error(traceback.format_exc())
+        return f"Error during minimal test (MethodNotImplemented/404): {str(e)}. This means the model couldn't be found or served via the default global endpoint. Check model name and its status in AI Studio/Vertex AI.", 500
     except Exception as e:
         logger.error(f"MINIMAL_TEST: Error during minimal test for model {test_model_name}: {str(e)}")
         logger.error(traceback.format_exc())
