@@ -1,10 +1,16 @@
-Flask
+Flask==2.3.3
 Flask-Session
-python-dotenv
-google-generativeai
-python-docx
-xhtml2pdf
-Pillow
-gunicorn  # Add Gunicorn for production
-requests # Often needed by google libraries
-# Add any other direct dependencies your app uses
+python-dotenv==1.0.1
+google-generativeai==0.8.5
+google-ai-generativelanguage==0.6.15
+google-api-core==2.19.2
+google-auth==2.39.0
+googleapis-common-protos==1.65.0
+proto-plus==1.24.0
+protobuf==5.29.4
+python-docx==1.1.2
+xhtml2pdf==0.2.16
+Pillow==10.4.0
+gunicorn==22.0.0
+requests==2.31.0
+# Add any other direct dependencies your app 
