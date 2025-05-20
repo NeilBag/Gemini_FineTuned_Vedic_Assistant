@@ -349,6 +349,60 @@ def request_entity_too_large(e):
     return redirect(url_for('index2')) # <<< FIXED Typo
 
 
+@app.route("/minimal_test")
+def minimal_test_route():
+    logger = logging.getLogger(__name__)
+    logger.info("Executing /minimal_test route")
+    if model is None: # Check if the global model object is initialized
+        logger.error("MINIMAL_TEST: Global AI Model is not initialized.")
+        return "Error: Global AI Model is not initialized.", 500
+    
+    # Verify if the global model is the one we want to test
+    # This check depends on how model_name is stored in your GenerativeModel object setup.
+    # Assuming model.model_name holds the name.
+    expected_model_name = "tunedModels/hinduism-veda-expert-v1"
+    # The model object from genai.GenerativeModel stores the name in _model_name
+    actual_model_name = model._model_name if hasattr(model, '_model_name') else "Name N/A"
+
+    if actual_model_name != expected_model_name:
+        logger.warning(f"MINIMAL_TEST: Global model is {actual_model_name}, not {expected_model_name}. Attempting to use it anyway.")
+        # For this test, we'll use the global model as is, even if the name doesn't match,
+        # to see what happens with the current global configuration.
+    
+    current_model_to_use = model
+
+    try:
+        logger.info(f"MINIMAL_TEST: Attempting to generate content with model: {actual_model_name}")
+        # Simplest call, ensure content is structured correctly if required by API version
+        # Based on previous fixes, send_message required content={"parts": [{"text": ...}]}
+        # For generate_content, the API might be more direct. Let's try simple string first.
+        # If that fails with InvalidArgument, we'll try the structured format.
+        response = current_model_to_use.generate_content("Test prompt from minimal_test route") 
+        
+        # Assuming response.text is the correct way to access the text part.
+        # This depends on the specific response object structure for generate_content.
+        # It might be response.parts[0].text or similar.
+        # For now, let's assume response.text is valid as per example.
+        # If there's an AttributeError, this is where it would show.
+        response_text = ""
+        if hasattr(response, 'text'):
+            response_text = response.text
+        elif hasattr(response, 'parts') and response.parts:
+            response_text = response.parts[0].text
+        else:
+            logger.warning(f"MINIMAL_TEST: Could not extract text from response. Response object: {response}")
+            # Attempt to get the full response object as a string if text extraction fails
+            response_text = str(response)
+
+
+        logger.info(f"MINIMAL_TEST: Response received: {response_text}")
+        return f"Minimal test successful. Response: {response_text}", 200
+    except Exception as e:
+        logger.error(f"MINIMAL_TEST: Error during minimal test with model ({actual_model_name}): {str(e)}")
+        logger.error(traceback.format_exc())
+        return f"Error during minimal test: {str(e)}", 500
+
+
 if __name__ == "__main__":
     # Set host='0.0.0.0' to be accessible externally, default is '127.0.0.1'
     # Debug mode should ideally be False in production (read from config)
