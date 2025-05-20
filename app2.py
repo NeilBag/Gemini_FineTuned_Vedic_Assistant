@@ -268,7 +268,7 @@ def index2():
             logger.info("Sending prompt to Generative AI...")
             api_history = build_history_for_api(session['chat_history'])
             chat_session = model.start_chat(history=api_history)
-            response = chat_session.send_message(full_prompt) # Send combined prompt
+            response = chat_session.send_message(content={"parts": [{"text": full_prompt}]}) # Send combined prompt
             response_text = response.text
             logger.info("Received response from Generative AI.")
 
@@ -323,6 +323,7 @@ def index2():
             return render_template("index2.html", history=template_history)
 
         except Exception as e:
+            logger.error(f"Problematic full_prompt was: {full_prompt}")
             logger.error(f"Error processing POST request: {str(e)}")
             logger.error(traceback.format_exc()) # Log full traceback for debugging
             flash(f"An error occurred while processing your request: {str(e)}", "error")
