@@ -54,20 +54,19 @@ def create_app(config=Configuration()):
     app = Flask(__name__)
     app.config.from_object(config)
 
-    api_key = os.getenv("GEMINI_API_KEY") # Using GEMINI_API_KEY as in your script
-    if api_key:
-        logger.info(f"DEBUG: GEMINI_API_KEY loaded. Length: {len(api_key)}. First 5: {api_key[:5]}, Last 5: {api_key[-5:]}")
-        try:
-            # !!!! FIXED: Pass client_options to genai.configure !!!!
-            genai.configure(
-                api_key=api_key,
-                client_options=ai_settings.CLIENT_OPTIONS # Apply client options here
-            )
-            logger.info(f"Generative AI SDK configured successfully with client_options: {ai_settings.CLIENT_OPTIONS}")
-        except Exception as e:
-            logger.exception(f"Failed to configure Generative AI SDK: {e}")
-    else:
-        logger.error("CRITICAL: GEMINI_API_KEY is NOT SET in the environment. AI features will not work.")
+    api_key = os.getenv("GEMINI_API_KEY")
+if api_key:
+    logger.info(f"DEBUG: GEMINI_API_KEY loaded. Length: {len(api_key)}. First 5: {api_key[:5]}, Last 5: {api_key[-5:]}")
+    try:
+        # !!!! REMOVE client_options !!!!
+        genai.configure(
+            api_key=api_key
+        )
+        logger.info("Generative AI SDK configured successfully (using default global endpoint).")
+    except Exception as e:
+        logger.exception(f"Failed to configure Generative AI SDK: {e}")
+else:
+    logger.error("CRITICAL: GEMINI_API_KEY is NOT SET in the environment. AI features will not work.")
 
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
     return app
