@@ -58,8 +58,12 @@ def create_app(config=Configuration()):
     if api_key:
         logger.info(f"DEBUG: GEMINI_API_KEY loaded. Length: {len(api_key)}. First 5: {api_key[:5]}, Last 5: {api_key[-5:]}")
         try:
-            genai.configure(api_key=api_key)
-            logger.info("Generative AI SDK configured successfully.")
+            # !!!! FIXED: Pass client_options to genai.configure !!!!
+            genai.configure(
+                api_key=api_key,
+                client_options=ai_settings.CLIENT_OPTIONS # Apply client options here
+            )
+            logger.info(f"Generative AI SDK configured successfully with client_options: {ai_settings.CLIENT_OPTIONS}")
         except Exception as e:
             logger.exception(f"Failed to configure Generative AI SDK: {e}")
     else:
@@ -72,28 +76,30 @@ app = create_app()
 
 # Initialize the AI model globally
 model = None
-if os.getenv("GEMINI_API_KEY"):
+if os.getenv("GEMINI_API_KEY"): # Check if API key was set for configuration
     try:
+        # !!!! FIXED: client_options is not passed to GenerativeModel directly !!!!
         model = genai.GenerativeModel(
-            model_name=ai_settings.MODEL_NAME,
-            # generation_config is passed to generate_content, not model constructor for this library version
-            # safety_settings can be set here if you want global safety settings for the model
-            client_options=ai_settings.CLIENT_OPTIONS # Apply client options
+            model_name=ai_settings.MODEL_NAME
+            # generation_config is passed to generate_content
+            # safety_settings can be set here if you want global safety settings
         )
-        logger.info(f"Global GenerativeModel '{ai_settings.MODEL_NAME}' initialized with client_options: {ai_settings.CLIENT_OPTIONS}")
+        logger.info(f"Global GenerativeModel '{ai_settings.MODEL_NAME}' initialized.")
+        # The regional endpoint is now handled by genai.configure()
     except Exception as e:
         logger.exception(f"Failed to initialize global GenerativeModel '{ai_settings.MODEL_NAME}': {e}")
 else:
-    logger.warning("Global AI Model not initialized because GEMINI_API_KEY is not set.")
+    logger.warning("Global AI Model not initialized because GEMINI_API_KEY is not set or SDK configuration failed.")
 
-# --- File Handling (remains the same) ---
+
+# --- File Handling ---
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
 
 def secure_save_file(file):
     if not file or not file.filename: return None, None
     filename = secure_filename(file.filename)
-    if not filename: filename = "unnamed_file"
+    if not filename: filename = "unnamed_file_" + tempfile.mktemp().split(os.sep)[-1] # More unique unnamed
     file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     try:
         file.save(file_path)
@@ -124,14 +130,14 @@ def read_file_content(file_path):
         logger.exception(f"Error reading file content from {file_path}: {e}")
         return f"(Error reading file {os.path.basename(file_path)})"
 
-# --- History Handling (simplified for template, API history not needed for generate_content) ---
+# --- History Handling ---
 def build_history_for_template(session_history):
     template_history = []
     for entry in session_history:
         template_history.append({'user': entry.get('user'), 'model': entry.get('model')})
     return template_history
 
-# --- Export Functions (remains mostly the same, ensure pisa is handled) ---
+# --- Export Functions ---
 def export_docx(text):
     try:
         document = Document()
@@ -177,16 +183,17 @@ def index2():
         template_history = build_history_for_template(session['chat_history'])
         return render_template("index2.html", history=template_history)
 
-    # Create GenerationConfig object from settings
+    # Create GenerationConfig object from settings for each request
     generation_config_obj = genai.types.GenerationConfig(**ai_settings.GENERATION_CONFIG_DICT)
 
-    user_prompt_for_history = "" # Store the original user text prompt for history
-    full_content_for_model = ""  # This will be the combined text for the model
+    user_prompt_for_history = ""
+    full_content_for_model = ""
 
     if request.method == "POST":
+        prompt_for_api = "" # Initialize to avoid UnboundLocalError in except block
         try:
             user_text_prompt = request.form.get("prompt", "").strip()
-            user_prompt_for_history = user_text_prompt # Save original for history
+            user_prompt_for_history = user_text_prompt
             export_format = request.form.get("export_format", "")
 
             uploaded_file_contents_str = ""
@@ -194,13 +201,13 @@ def index2():
             files = request.files.getlist("files")
             if files:
                 temp_file_contents = []
-                for file_in in files: # Renamed to avoid conflict
+                for file_in in files:
                     if file_in and file_in.filename and allowed_file(file_in.filename):
                         file_path, original_filename = secure_save_file(file_in)
                         if file_path:
                             logger.info(f"Processing uploaded file: {original_filename}")
                             content = read_file_content(file_path)
-                            temp_file_contents.append(f"--- Content from {original_filename} ---\n{content}\n--- End of {original_filename} ---")
+                            temp_file_contents.append(f"--- Context from {original_filename} ---\n{content}\n--- End of {original_filename} Context ---")
                             uploaded_filenames.append(original_filename)
                         else:
                             flash(f"Could not save file: {file_in.filename}", "warning")
@@ -209,24 +216,23 @@ def index2():
                 if temp_file_contents:
                     uploaded_file_contents_str = "\n\n".join(temp_file_contents)
 
-            # Combine uploaded content (if any) with the text prompt
             if uploaded_file_contents_str:
-                full_content_for_model = uploaded_file_contents_str + "\n\n" + user_text_prompt
-                if uploaded_filenames: # Update history prompt if files were used
+                full_content_for_model = uploaded_file_contents_str + "\n\nUser Question: " + user_text_prompt
+                if uploaded_filenames:
                      user_prompt_for_history += f"\n\n(Used uploaded files: {', '.join(uploaded_filenames)})"
             else:
                 full_content_for_model = user_text_prompt
 
-            if not full_content_for_model: # Check if there's any content to send
-                flash("Please enter a prompt or upload a file.", "warning")
+            if not full_content_for_model.strip(): # Check if there's any actual content
+                flash("Please enter a prompt or upload a file with content.", "warning")
                 template_history = build_history_for_template(session['chat_history'])
                 return render_template("index2.html", history=template_history)
 
-            # !!!! IMPORTANT: Format the full content using the model's expected Q&A template !!!!
+            # Format the full content using the model's expected Q&A template
             prompt_for_api = ai_settings.PROMPT_TEMPLATE_VEDA.format(user_question_and_context=full_content_for_model)
 
             logger.info("Sending prompt to Generative AI using generate_content...")
-            logger.info(f"Formatted prompt for API (first 200 chars): {prompt_for_api[:200]}...")
+            logger.info(f"Formatted prompt for API (first 300 chars): {prompt_for_api[:300]}...")
 
             # --- Use model.generate_content() ---
             response = model.generate_content(
@@ -234,8 +240,8 @@ def index2():
                 generation_config=generation_config_obj,
                 # safety_settings=... # Optional: add safety settings
             )
-            response_text = response.text
-            logger.info("Received response from Generative AI.")
+            response_text = response.text # Assuming response.text is directly available
+            logger.info(f"Received response from Generative AI (first 300 chars): {response_text[:300]}...")
 
             session['chat_history'].append({'user': user_prompt_for_history, 'model': response_text})
             session.modified = True
@@ -264,15 +270,15 @@ def index2():
             template_history = build_history_for_template(session['chat_history'])
             return render_template("index2.html", history=template_history)
 
-        except exceptions.InvalidArgument as e: # Catch specific API error
-            logger.error(f"Problematic full_content_for_model was (first 200 chars): {full_content_for_model[:200]}")
-            logger.error(f"Problematic prompt_for_api was (first 200 chars): {prompt_for_api[:200] if 'prompt_for_api' in locals() else 'Not generated'}")
+        except exceptions.InvalidArgument as e:
+            logger.error(f"Problematic full_content_for_model (first 300 chars): {full_content_for_model[:300]}")
+            logger.error(f"Problematic prompt_for_api (first 300 chars): {prompt_for_api[:300] if 'prompt_for_api' in locals() else 'Not generated'}")
             logger.error(f"InvalidArgument error processing POST request: {str(e)}")
             logger.error(traceback.format_exc())
-            flash(f"An API error occurred (InvalidArgument): {str(e)}. This often means the prompt structure is not what the fine-tuned model expects.", "error")
+            flash(f"An API error occurred (InvalidArgument): {str(e)}. This often means the prompt structure is not what the fine-tuned model expects or the content is problematic.", "error")
             return redirect(url_for('index2'))
         except Exception as e:
-            logger.error(f"Problematic full_content_for_model was (first 200 chars): {full_content_for_model[:200]}")
+            logger.error(f"Problematic full_content_for_model (first 300 chars): {full_content_for_model[:300]}")
             logger.error(f"General error processing POST request: {str(e)}")
             logger.error(traceback.format_exc())
             flash(f"An error occurred: {str(e)}", "error")
@@ -290,47 +296,42 @@ def clear_history():
 @app.errorhandler(413)
 def request_entity_too_large(e):
     flash("The uploaded file(s) are too large. Maximum allowed total size is 16MB.", "error")
-    return redirect(url_for('index2')) # Corrected from 'index'
+    return redirect(url_for('index2'))
 
-# Minimal test route remains the same, it's good for testing basic connectivity.
 @app.route("/minimal_test")
 def minimal_test_route():
-    logger = logging.getLogger(__name__) # Use correct logger name
-    logger.info("Executing /minimal_test route with regional endpoint")
+    logger = logging.getLogger(__name__)
+    logger.info("Executing /minimal_test route")
 
-    api_key_test = os.getenv("GEMINI_API_KEY") # Consistent key name
-    if not api_key_test:
+    if not os.getenv("GEMINI_API_KEY"):
         logger.error("MINIMAL_TEST: GEMINI_API_KEY not found.")
         return "Error: GEMINI_API_KEY not found", 500
 
-    # Model should already be initialized globally, but for isolated test:
-    test_model_name = ai_settings.MODEL_NAME # Use from settings
-    client_options_test = ai_settings.CLIENT_OPTIONS # Use from settings
+    if model is None:
+        logger.error("MINIMAL_TEST: Global model is not initialized.")
+        return "Error: Global model not initialized. Check server logs.", 500
 
+    test_model_name = ai_settings.MODEL_NAME
     try:
-        test_model = genai.GenerativeModel(
-            model_name=test_model_name,
-            client_options=client_options_test
-        )
-        logger.info(f"MINIMAL_TEST: Attempting to generate content with model: {test_model.model_name} using endpoint {client_options_test.get('api_endpoint','default')}")
+        logger.info(f"MINIMAL_TEST: Attempting to generate content with global model: {model.model_name}")
 
-        simple_generation_config_test = genai.types.GenerationConfig(
-            temperature=0.7, max_output_tokens=50 # Small for test
+        generation_config_test = genai.types.GenerationConfig(
+            temperature=0.7, max_output_tokens=50
         )
-        test_prompt_minimal = "Briefly explain the concept of Dharma." # A simple Veda related question
+        test_prompt_minimal = "Briefly explain the concept of Atman in Vedanta." # Veda related
 
-        # !!!! IMPORTANT: Format the prompt for the Q&A model !!!!
+        # IMPORTANT: Format the prompt for the Q&A model
         formatted_test_prompt = ai_settings.PROMPT_TEMPLATE_VEDA.format(user_question_and_context=test_prompt_minimal)
         logger.info(f"MINIMAL_TEST: Formatted prompt: {formatted_test_prompt}")
 
-        response = test_model.generate_content(
+        response = model.generate_content( # Use the global 'model' instance
             formatted_test_prompt,
-            generation_config=simple_generation_config_test
+            generation_config=generation_config_test
             )
 
         response_text = response.text if hasattr(response, 'text') and response.text else str(response)
         logger.info(f"MINIMAL_TEST: Response received: {response_text}")
-        return f"Minimal test with regional endpoint successful. Response: {response_text}", 200
+        return f"Minimal test successful. Response: {response_text}", 200
     except Exception as e:
         logger.error(f"MINIMAL_TEST: Error during minimal test for model {test_model_name}: {str(e)}")
         logger.error(traceback.format_exc())
